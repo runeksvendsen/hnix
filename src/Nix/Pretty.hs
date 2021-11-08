@@ -99,7 +99,8 @@ wrapPath op sub =
     ("\"${" <> withoutParens sub <> "}\"")
     (wasPath sub)
 
-prettyString :: NString (NixDoc ann) -> Doc ann
+-- | Handle Output representation of the string escape codes.
+prettyString :: forall ann . NString (NixDoc ann) -> Doc ann
 prettyString (DoubleQuoted parts) = "\"" <> foldMap prettyPart parts <> "\""
  where
   -- It serializes Text -> String, because the helper code is done for String,
@@ -124,11 +125,14 @@ prettyString (Indented _ parts) = group $ nest 2 $ vcat
     flt [Plain t] | Text.null (strip t) = False
     flt _ = True
 
+  prettyLine :: [Antiquoted Text (NixDoc ann)] -> Doc ann
   prettyLine = hcat . fmap prettyPart
-  prettyPart (Plain t) =
-    pretty . replace "${" "''${" . replace "''" "'''" $ t
-  prettyPart EscapedNewline = "\\n"
-  prettyPart (Antiquoted r) = "${" <> withoutParens r <> "}"
+   where
+    prettyPart :: Antiquoted Text (NixDoc ann) -> Doc ann
+    prettyPart (Plain t) =
+      pretty . replace "${" "''${" . replace "''" "'''" $ t
+    prettyPart EscapedNewline = "\\n"
+    prettyPart (Antiquoted r) = "${" <> withoutParens r <> "}"
 
 prettyVarName :: VarName -> Doc ann
 prettyVarName = pretty @Text . coerce
@@ -165,9 +169,9 @@ prettyBind (NamedVar n v _p) =
   prettySelector n <> " = " <> withoutParens v <> ";"
 prettyBind (Inherit s ns _p) =
   "inherit " <> scope <> align (fillSep $ prettyVarName <$> ns) <> ";"
-  where
-    scope =
-      ((<> " ") . parens . withoutParens) `whenJust` s
+ where
+  scope =
+    ((<> " ") . parens . withoutParens) `whenJust` s
 
 prettyKeyName :: NKeyName (NixDoc ann) -> Doc ann
 prettyKeyName (StaticKey key) =
