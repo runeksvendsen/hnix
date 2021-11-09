@@ -147,7 +147,7 @@ prettyParams (ParamSet mname variadic pset) =
   toDoc (coerce -> name) =
     ("@" <> pretty name) `whenFalse` Text.null name
 
-prettyParamSet :: Variadic -> ParamSet (NixDoc ann) -> Doc ann
+prettyParamSet :: forall ann . Variadic -> ParamSet (NixDoc ann) -> Doc ann
 prettyParamSet variadic args =
   encloseSep
     "{ "
@@ -155,6 +155,7 @@ prettyParamSet variadic args =
     sep
     (fmap prettySetArg args <> one "..." `whenTrue` (variadic == Variadic))
  where
+  prettySetArg :: (VarName, Maybe (NixDoc ann)) -> Doc ann
   prettySetArg (n, maybeDef) =
     maybe
       varName
@@ -162,7 +163,7 @@ prettyParamSet variadic args =
       maybeDef
    where
     varName = prettyVarName n
-  sep            = align ", "
+  sep = align ", "
 
 prettyBind :: Binding (NixDoc ann) -> Doc ann
 prettyBind (NamedVar n v _p) =
