@@ -233,6 +233,15 @@ prettyOriginExpr = getDoc . go
           --                           . go . originExpr)
           --     mempty (reverse ps)
 
+-- | Takes original expression from inside provenance information.
+-- Prettifies that expression.
+prettyExtractFromProvenance
+  :: forall t f m ann
+   . HasCitations1 m (NValue t f m) f
+  => [Provenance m (NValue t f m)] -> [Doc ann]
+prettyExtractFromProvenance =
+  fmap (prettyOriginExpr . getOriginExpr)
+
 exprFNixDoc :: forall ann . NExprF (NixDoc ann) -> NixDoc ann
 exprFNixDoc = \case
   NConstant atom -> prettyAtom atom
@@ -374,7 +383,7 @@ prettyNValueProv v =
       fillSep
         [ prettyNVal
         , indent 2 $
-          "(" <> fold (one "from: " <> (prettyOriginExpr . getOriginExpr <$> ps)) <> ")"
+          "(" <> fold (one "from: " <> prettyExtractFromProvenance ps) <> ")"
         ]
     )
     (citations @m @(NValue t f m) v)
@@ -398,7 +407,7 @@ prettyNThunk t =
       fillSep
         [ v'
         , indent 2 $
-          "(" <> fold (one "thunk from: " <> (prettyOriginExpr . getOriginExpr <$> ps)) <> ")"
+          "(" <> fold (one "thunk from: " <> prettyExtractFromProvenance ps) <> ")"
         ]
 
 -- | This function is used only by the testing code.
