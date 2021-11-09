@@ -3,6 +3,7 @@
 
 {-# options_ghc -fno-warn-name-shadowing #-}
 
+--  2021-11-09: NOTE: Please do not reduce explicit `"${" <> a <> "}"` types of wrappings - as they are readable and so analyzable at eyesight. HNix already has a difficult task of 100% matching the escaping of an unpstream project.
 
 module Nix.Pretty where
 
@@ -78,24 +79,34 @@ selectOp = getSpecialOperator NSelectOp
 hasAttrOp :: OperatorInfo
 hasAttrOp = getSpecialOperator NHasAttrOp
 
-wrapParens :: OperatorInfo -> NixDoc ann -> Doc ann
-wrapParens op sub =
-  bool
-    parens
-    id
-    (   precedence (rootOp sub)   <  precedence op
-    || (precedence (rootOp sub)   == precedence op
-        && associativity (rootOp sub) == associativity op
-        && associativity op /= NAssocNone)
-    )
-    (getDoc sub)
+-- | Determine if to return doc wraped into parens,
+-- according the given operator.
+precedenceWrap :: OperatorInfo -> NixDoc ann -> Doc ann
+precedenceWrap op sub = maybeWrap (getDoc sub)
+ where
+  maybeWrap :: Doc ann -> Doc ann
+  maybeWrap =
+    bool
+      parens
+      id
+      needsParens
+
+  root = rootOp sub
+
+  needsParens :: Bool
+  needsParens =
+    precedence root       <  precedence op
+    || (precedence root       == precedence op
+        && associativity root == associativity op
+        && associativity op   /= NAssocNone
+      )
 
 -- Used in the selector case to print a path in a selector as
 -- "${./abc}"
 wrapPath :: OperatorInfo -> NixDoc ann -> Doc ann
 wrapPath op sub =
   bool
-    (wrapParens op sub)
+    (precedenceWrap op sub)
     ("\"${" <> getDoc sub <> "}\"")
     (wasPath sub)
 
@@ -226,7 +237,7 @@ exprFNixDoc = \case
   NConstant atom -> prettyAtom atom
   NStr      str  -> simpleExpr $ prettyString str
   NList xs ->
-    prettyContainer "[" (wrapParens appOpNonAssoc) "]" xs
+    prettyContainer "[" (precedenceWrap appOpNonAssoc) "]" xs
   NSet NonRecursive xs ->
     prettyContainer "{" prettyBind "}" xs
   NSet Recursive xs ->
@@ -239,7 +250,7 @@ exprFNixDoc = \case
           , getDoc body
           ]
   NBinary NApp fun arg ->
-    mkNixDoc appOp (wrapParens appOp fun <> " " <> wrapParens appOpNonAssoc arg)
+    mkNixDoc appOp (precedenceWrap appOp fun <> " " <> precedenceWrap appOpNonAssoc arg)
   NBinary op r1 r2 ->
     mkNixDoc
       opInfo $
@@ -252,7 +263,7 @@ exprFNixDoc = \case
     opInfo = getBinaryOperator op
     f :: NAssoc -> NixDoc ann -> Doc ann
     f x =
-      wrapParens
+      precedenceWrap
         $ bool
             opInfo
             (opInfo { associativity = NAssocNone })
@@ -260,7 +271,7 @@ exprFNixDoc = \case
   NUnary op r1 ->
     mkNixDoc
       opInfo $
-      pretty (operatorName opInfo) <> wrapParens opInfo r1
+      pretty (operatorName opInfo) <> precedenceWrap opInfo r1
    where
     opInfo = getUnaryOperator op
   NSelect o r' attr ->
@@ -268,10 +279,10 @@ exprFNixDoc = \case
       (mkNixDoc selectOp)
       (const leastPrecedence)
       o
-      $ wrapPath selectOp (mkNixDoc selectOp (wrapParens appOpNonAssoc r')) <> "." <> prettySelector attr <>
-        ((" or " <>) . wrapParens appOpNonAssoc) `whenJust` o
+      $ wrapPath selectOp (mkNixDoc selectOp (precedenceWrap appOpNonAssoc r')) <> "." <> prettySelector attr <>
+        ((" or " <>) . precedenceWrap appOpNonAssoc) `whenJust` o
   NHasAttr r attr ->
-    mkNixDoc hasAttrOp (wrapParens hasAttrOp r <> " ? " <> prettySelector attr)
+    mkNixDoc hasAttrOp (precedenceWrap hasAttrOp r <> " ? " <> prettySelector attr)
   NEnvPath     p -> simpleExpr $ pretty @String $ "<" <> coerce p <> ">"
   NLiteralPath p ->
     pathExpr $
