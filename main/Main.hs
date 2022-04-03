@@ -32,6 +32,7 @@ import           Prettyprinter           hiding ( list )
 import           Prettyprinter.Render.Text      ( renderIO )
 import qualified Repl
 import           Nix.Eval
+import qualified Debug.Trace
 
 main :: IO ()
 main =
@@ -124,7 +125,7 @@ main' opts@Options{..} = runWithBasicEffectsIO opts execContentsFilesOrRepl
                 (liftIO . putStrLn . (<>) "Type of expression: " .
                   ppShow . maybeToMonoid . Map.lookup @VarName @[Scheme] "it" . coerce
                 )
-                $ HM.inferTop mempty $ curry one "it" $ stripAnnotation expr'
+                $ HM.inferTop mempty $ (\expr'' -> ("inferTop: " <> show expr) `Debug.Trace.trace` expr'') $ curry one "it" $ stripAnnotation expr'
 
                 -- liftIO $ putStrLn $ runST $
                 --     runLintM opts . renderSymbolic =<< lint opts expr

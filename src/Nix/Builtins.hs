@@ -388,7 +388,7 @@ instance Convertible e t f m => ToValue FileType m (NValue t f m) where
 derivationNix
   :: forall e t f m. (MonadNix e t f m, Scoped (NValue t f m) m)
   => m (NValue t f m)
-derivationNix = foldFix Eval.eval $$(do
+derivationNix = foldFix Eval.evalTrace $$(do
     -- This is compiled in so that we only parse it once at compile-time.
     let Right expr = parseNixText [text|
       drvAttrs @ { outputs ? [ "out" ], ... }:
@@ -2024,4 +2024,3 @@ builtins =
     nameBuiltins b@(Builtin TopLevel _) = b
     nameBuiltins (Builtin Normal nB) =
       Builtin TopLevel $ first (coerce @(Text -> Text) ("__" <>)) nB
-

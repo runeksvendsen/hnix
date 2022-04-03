@@ -50,7 +50,7 @@ import           Nix.Convert
 import           Nix.Eval                       ( MonadEval(..) )
 import qualified Nix.Eval                      as Eval
                                                 ( eval
-                                                , evalWithAttrSet
+                                                , evalWithAttrSet, evalTrace
                                                 )
 import           Nix.Expr.Types
 import           Nix.Fresh
@@ -749,7 +749,7 @@ liftInfer = InferT . lift . lift . lift
 -- * Other
 
 infer :: MonadInfer m => NExpr -> InferT s m (Judgment s)
-infer = foldFix Eval.eval
+infer = foldFix Eval.evalTrace
 
 inferTop :: Env -> [(VarName, NExpr)] -> Either InferError Env
 inferTop env []                = pure env

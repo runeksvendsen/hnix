@@ -1,0 +1,19 @@
+cradle:
+  cabal:
+    - path: "./src"
+      component: "lib:hnix"
+
+    - path: "./main/Main.hs"
+      component: "hnix:exe:hnix"
+
+    - path: "./main/Repl.hs"
+      component: "hnix:exe:hnix"
+
+    - path: "./tests"
+      component: "hnix:test:hnix-tests"
+
+    - path: "./benchmarks/Main.hs"
+      component: "hnix:bench:hnix-benchmarks"
+
+    - path: "./benchmarks/ParserBench.hs"
+      component: "hnix:bench:hnix-benchmarks"

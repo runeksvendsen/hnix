@@ -23,6 +23,7 @@ import           Nix.Frames
 import           Nix.String
 import           Nix.Scope
 import           Nix.Value.Monad
+import qualified Debug.Trace
 
 class (Show v, Monad m) => MonadEval v m where
   freeVariable    :: VarName -> m v
@@ -98,10 +99,13 @@ data SynHoleInfo m v = SynHoleInfo
 
 instance (Typeable m, Typeable v) => Exception (SynHoleInfo m v)
 
+evalTrace :: forall v m . MonadNixEval v m => Show v => NExprF (m v) -> m v
+evalTrace expr = (("eval: " <> show (void expr)) `Debug.Trace.trace`) $ eval expr
+
 -- jww (2019-03-18): By deferring only those things which must wait until
 -- context of us, this can be written as:
 -- eval :: forall v m . MonadNixEval v m => NExprF v -> m v
-eval :: forall v m . MonadNixEval v m => NExprF (m v) -> m v
+eval :: forall v m . MonadNixEval v m => Show v => NExprF (m v) -> m v
 
 eval (NSym "__curPos") = evalCurPos
 
@@ -149,7 +153,11 @@ eval (NList l           ) =
 
 eval (NSet r binds) =
   do
-    attrSet <- evalBinds (r == Recursive) $ desugarBinds (eval . NSet mempty) binds
+    Debug.Trace.traceM $ "eval NSet rec?: " <> show r
+    let d = desugarBinds (eval . NSet mempty) binds
+    Debug.Trace.traceM $ "eval desugarBinds: " <> show (void d)
+    attrSet <- evalBinds (r == Recursive) d
+    Debug.Trace.traceM $ "eval NSet attrSet: " <> show attrSet
     toValue attrSet
 
 eval (NLet binds body    ) =
@@ -262,7 +270,8 @@ attrSetAlter ks' pos m' p' val =
       insertVal . ((toValue @(AttrSet v, PositionSet)) <=< ((,mempty) <$>) . sequenceA . snd) <$> go p'' m'' ks
 
 desugarBinds :: forall r . ([Binding r] -> r) -> [Binding r] -> [Binding r]
-desugarBinds embed = (`evalState` mempty) . traverse (findBinding <=< collect)
+desugarBinds embed =
+  (`evalState` mempty) . traverse (findBinding <=< collect)
  where
   collect
     :: Binding r
@@ -413,20 +422,22 @@ evalBinds isRecursive binds =
 
 evalSelect
   :: forall v m
-   . MonadNixEval v m
+   . MonadNixEval v m => Show v
   => m v
   -> NAttrPath (m v)
   -> m (Either (v, NonEmpty VarName) (m v))
-evalSelect aset attr =
+evalSelect aset attr = (("evalSelect: " <> show (void attr)) `Debug.Trace.trace`) $
   do
     s    <- aset
+    Debug.Trace.traceM $ "select s: " <> show s
     path <- traverse evalGetterKeyName attr
+    Debug.Trace.traceM $ "select path: " <> show path
 
     extract path s
 
  where
   extract :: NonEmpty VarName -> v -> m (Either (v, NonEmpty VarName) (m v))
-  extract path@(k :| ks) x =
+  extract path@(k :| ks) x = (("extract: " <> show path) `Debug.Trace.trace`) $
     maybe
       left
       (maybe
@@ -463,8 +474,8 @@ evalSetterKeyName
   :: (MonadEval v m, FromValue NixString m v)
   => NKeyName (m v)
   -> m (Maybe VarName)
-evalSetterKeyName =
-  \case
+evalSetterKeyName keyName = (("evalSetterKeyName: " <> show (void keyName)) `Debug.Trace.trace`) $
+  case keyName of
     StaticKey k -> pure $ pure k
     DynamicKey k ->
       coerce . ignoreContext <<$>> runAntiquoted "\n" assembleString (fromValueMay =<<) k

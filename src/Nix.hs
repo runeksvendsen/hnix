@@ -69,7 +69,7 @@ nixEvalExpr
   => Maybe Path
   -> NExpr
   -> m (NValue t f m)
-nixEvalExpr = nixEval id Eval.eval
+nixEvalExpr = nixEval id Eval.evalTrace
 
 -- | Evaluate a nix expression in the default context
 nixEvalExprLoc

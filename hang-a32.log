@@ -1,0 +1,9 @@
+Preprocessing executable 'tasty-discover' for tasty-discover-4.2.2..
+Building executable 'tasty-discover' for tasty-discover-4.2.2..
+[1 of 2] Compiling Main             ( executable/Main.hs, dist/build/tasty-discover/tasty-discover-tmp/Main.o )
+[2 of 2] Compiling Paths_tasty_discover ( dist/build/tasty-discover/autogen/Paths_tasty_discover.hs, dist/build/tasty-discover/tasty-discover-tmp/Paths_tasty_discover.o )
+Linking dist/build/tasty-discover/tasty-discover ...
+Preprocessing test suite 'tasty-discover-test' for tasty-discover-4.2.2..
+Building test suite 'tasty-discover-test' for tasty-discover-4.2.2..
+[1 of 7] Compiling ConfigTest       ( test/ConfigTest.hs, dist/build/tasty-discover-test/tasty-discover-test-tmp/ConfigTest.o )
+

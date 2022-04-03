@@ -7,9 +7,20 @@
 module Nix.Scope where
 
 import qualified Data.HashMap.Lazy             as M
+import qualified Data.HashMap.Internal         as HMI
 import qualified Text.Show
 import           Lens.Family2
 import           Nix.Expr.Types
+import qualified Debug.Trace
+
+showHM :: HashMap k v -> String
+showHM hm =
+  case hm of
+    HMI.Empty -> "Empty"
+    HMI.BitmapIndexed bitmap array -> "BitmapIndexed bitmap array"
+    HMI.Leaf hash leaf -> "Leaf hash leaf"
+    HMI.Full array -> "Full array"
+    HMI.Collision hash array -> "Collision hash array"
 
 --  2021-07-19: NOTE: Scopes can gain from sequentiality, HashMap (aka AttrSet) may not be proper to it.
 newtype Scope a = Scope (AttrSet a)
@@ -23,7 +34,7 @@ newtype Scope a = Scope (AttrSet a)
     )
 
 instance Show (Scope a) where
-  show (Scope m) = show $ M.keys m
+  show (Scope m) = "Scope: " <> showHM m
 
 scopeLookup :: VarName -> [Scope a] -> Maybe a
 scopeLookup key = foldr fun Nothing
@@ -36,7 +47,7 @@ scopeLookup key = foldr fun Nothing
 
 data Scopes m a =
   Scopes
-    { lexicalScopes :: [Scope a]
+    { lexicalScopes :: ![Scope a]
     , dynamicScopes :: [m (Scope a)]
     }
 
@@ -81,7 +92,9 @@ pushScope
   => Scope a
   -> m r
   -> m r
-pushScope scope = pushScopes $ Scopes (one scope) mempty
+pushScope scope = do
+  Debug.Trace.traceM ("pushScope: " <> show scope)
+  pushScopes $ Scopes (one scope) mempty
 
 pushWeakScope
   :: ( Functor m
@@ -110,7 +123,15 @@ lookupVarReader
   -> m (Maybe a)
 lookupVarReader k =
   do
-    mres <- asks $ scopeLookup k . lexicalScopes @m . view hasLens
+    Debug.Trace.traceM $ "lookupVarReader: " <> show k
+    let lexicalScopes' = lexicalScopes @m . view hasLens
+    lexicalScopesAsk <- asks lexicalScopes'
+    Debug.Trace.traceM $ "lexicalScopes length: " <> show (length lexicalScopesAsk)
+    Debug.Trace.traceM $ "lexicalScopes head: " <> show (viaNonEmpty Prelude.head lexicalScopesAsk)
+    Debug.Trace.traceM $ "lexicalScopes: " <> show (lexicalScopesAsk :: [Scope a])
+
+    mres <- asks $ scopeLookup k . lexicalScopes'
+    Debug.Trace.traceM $ "mres: " <> maybe "mres Nothing" (const "mres Just") mres
 
     maybe
       (do

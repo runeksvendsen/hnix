@@ -30,7 +30,7 @@ import           Data.Data
 import           Data.Fix                       ( Fix(..) )
 import           Data.Functor.Classes
 import           Data.Hashable.Lifted
-import qualified Data.HashMap.Lazy             as MapL
+import qualified Data.HashMap.Strict             as MapL
 import qualified Data.Set                      as Set
 import qualified Data.List.NonEmpty            as NE
 import qualified Text.Show
