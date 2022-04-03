@@ -157,7 +157,7 @@ initState mIni = do
   builtins <- evalText "builtins"
 
   let
-    scope = coerce $
+    scope = mkScope $
       M.fromList $
       ("builtins", builtins) : fmap ("input",) (maybeToList mIni)
 
@@ -231,7 +231,7 @@ exec update source =
 
                   -- If the result value is a set, update our context with it
                   case val of
-                    NVSet _ (coerce -> scope) -> put state { replCtx = scope <> replCtx state }
+                    NVSet _ (mkScope -> scope) -> put state { replCtx = scope <> replCtx state }
                     _          -> stub
 
                 pure $ pure val
@@ -300,7 +300,7 @@ browse _ =
           liftIO $ Text.putStr $ coerce k <> " = "
           printValue v
       )
-      (M.toList $ coerce $ replCtx state)
+      (M.toList $ unScope $ replCtx state)
 
 -- | @:load@ command
 load
@@ -327,7 +327,7 @@ typeof src = do
     maybe
       (exec False src)
       (pure . pure)
-      (M.lookup (coerce src) (coerce $ replCtx state))
+      (M.lookup (coerce src) (unScope $ replCtx state))
 
   traverse_ printValueType mVal
 
@@ -408,7 +408,7 @@ completeFunc reversedPrev word
                     candidates
                   )
         )
-        (M.lookup (coerce var) $ coerce $ replCtx state)
+        (M.lookup (coerce var) $ unScope $ replCtx state)
 
   -- Builtins, context variables
   | otherwise =
@@ -416,7 +416,7 @@ completeFunc reversedPrev word
       state <- get
       let
           scopeHashMap :: HashMap VarName (NValue t f m)
-          scopeHashMap = coerce $ replCtx state
+          scopeHashMap = unScope $ replCtx state
           contextKeys :: [VarName]
           contextKeys = M.keys scopeHashMap
           builtins :: AttrSet (NValue t f m)

@@ -183,7 +183,7 @@ reduce (NBinaryAnnF bann NApp fun arg) =
       do
         x <- arg
         pushScope
-          (coerce $ HM.singleton name x)
+          (mkScope $ HM.singleton name x)
           (foldFix reduce body)
 
     f -> NBinaryAnn bann NApp f <$> arg
@@ -269,7 +269,7 @@ reduce (NLetAnnF ann binds body) =
   do
     binds' <- traverse sequenceA binds
     body'  <-
-      (`pushScope` body) . coerce . HM.fromList . catMaybes =<<
+      (`pushScope` body) . mkScope . HM.fromList . catMaybes =<<
         traverse
           (\case
             NamedVar (StaticKey name :| []) def _pos ->
@@ -322,7 +322,7 @@ reduce (NAbsAnnF ann params body) = do
   -- Make sure that variable definitions in scope do not override function
   -- arguments.
   let
-    scope = coerce $
+    scope = mkScope $
       case params' of
         Param    name     -> one (name, NSymAnn ann name)
         ParamSet _ _ pset ->

@@ -1266,7 +1266,7 @@ scopedImportNix
   -> m (NValue t f m)
 scopedImportNix asetArg pathArg =
   do
-    (coerce -> scope) <- fromValue @(AttrSet (NValue t f m)) asetArg
+    (mkScope -> scope) <- fromValue @(AttrSet (NValue t f m)) asetArg
     p <- fromValue pathArg
 
     path  <- pathToDefaultNix @t @f @m p
@@ -2009,7 +2009,7 @@ builtins
 builtins =
   do
     ref <- defer $ mkNVSet mempty <$> buildMap
-    (`pushScope` askScopes) . coerce . M.fromList . (one ("builtins", ref) <>) =<< topLevelBuiltins
+    (`pushScope` askScopes) . mkScope . M.fromList . (one ("builtins", ref) <>) =<< topLevelBuiltins
  where
   buildMap :: m (HashMap VarName (NValue t f m))
   buildMap         =  M.fromList . (mapping <$>) <$> builtinsList

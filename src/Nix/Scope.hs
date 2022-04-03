@@ -4,7 +4,13 @@
 {-# language FunctionalDependencies #-}
 {-# language GeneralizedNewtypeDeriving #-}
 
-module Nix.Scope where
+module Nix.Scope
+( Scope, mkScope, unScope
+, Scopes(lexicalScopes, dynamicScopes)
+, scopeLookup
+, Scoped(..)
+, askScopesReader, clearScopesReader, pushScope, pushWeakScope, pushScopesReader, lookupVarReader, withScopes)
+ where
 
 import qualified Data.HashMap.Lazy             as M
 import qualified Data.HashMap.Internal         as HMI
@@ -17,10 +23,10 @@ showHM :: HashMap k v -> String
 showHM hm =
   case hm of
     HMI.Empty -> "Empty"
-    HMI.BitmapIndexed bitmap array -> "BitmapIndexed bitmap array"
-    HMI.Leaf hash leaf -> "Leaf hash leaf"
-    HMI.Full array -> "Full array"
-    HMI.Collision hash array -> "Collision hash array"
+    HMI.BitmapIndexed _ _ -> "BitmapIndexed bitmap array"
+    HMI.Leaf _ _ -> "Leaf hash leaf"
+    HMI.Full _ -> "Full array"
+    HMI.Collision _ _ -> "Collision hash array"
 
 --  2021-07-19: NOTE: Scopes can gain from sequentiality, HashMap (aka AttrSet) may not be proper to it.
 newtype Scope a = Scope (AttrSet a)
@@ -32,6 +38,12 @@ newtype Scope a = Scope (AttrSet a)
     , Functor, Foldable, Traversable
     , One
     )
+
+mkScope :: AttrSet a -> Scope a
+mkScope = Scope
+
+unScope :: Scope a -> AttrSet a
+unScope (Scope a) = a
 
 instance Show (Scope a) where
   show (Scope m) = "Scope: " <> showHM m

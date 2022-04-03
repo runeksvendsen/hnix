@@ -365,7 +365,7 @@ instance MonadLint e m => MonadEval (Symbolic m) m where
 
       pushWeakScope
         (case s of
-          NMany [TSet (Just (coerce -> scope))] -> pure scope
+          NMany [TSet (Just (mkScope -> scope))] -> pure scope
           NMany [TSet Nothing] -> error "NYI: with unknown"
           _ -> throwError $ ErrorCall "scope must be a set in with statement"
         )

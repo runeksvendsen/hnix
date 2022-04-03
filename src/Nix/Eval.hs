@@ -163,7 +163,7 @@ eval (NSet r binds) =
 eval (NLet binds body    ) =
   do
     (attrSet, _) <- evalBinds True binds
-    pushScope (coerce attrSet) body
+    pushScope (mkScope attrSet) body
 
 eval (NIf cond t f       ) =
   do
@@ -190,11 +190,11 @@ eval (NAbs    params body) = do
     fun arg k =
       withCurScope $
         do
-          (coerce -> newScopeToAdd) <- buildArgument params arg
+          (mkScope -> newScopeToAdd) <- buildArgument params arg
           pushScope
             newScopeToAdd $
             k
-              (coerce $ withCurScope . inform <$> newScopeToAdd)
+              (unScope $ withCurScope . inform <$> newScopeToAdd)
               body
 
   evalAbs
@@ -213,7 +213,7 @@ evalWithAttrSet aset body = do
   -- sure the action it evaluates is to force a thunk, so its value is only
   -- computed once.
   deferredAset <- defer $ withScopes scopes aset
-  let weakscope = coerce . fst <$> (fromValue @(AttrSet v, PositionSet) =<< demand deferredAset)
+  let weakscope = mkScope . fst <$> (fromValue @(AttrSet v, PositionSet) =<< demand deferredAset)
 
   pushWeakScope weakscope body
 
@@ -333,7 +333,7 @@ evalBinds isRecursive binds =
     -> m (AttrSet v, PositionSet)
   buildResult scopes bindings =
     do
-      (coerce -> scope, p) <- foldM insert mempty bindings
+      (mkScope -> scope, p) <- foldM insert mempty bindings
       res <-
         bool
           (traverse mkThunk)
@@ -341,7 +341,7 @@ evalBinds isRecursive binds =
           isRecursive
           scope
 
-      pure (coerce res, p)
+      pure (unScope res, p)
 
    where
     insert (m, p) (path, pos, value) = attrSetAlter path pos m p value
@@ -407,7 +407,7 @@ evalBinds isRecursive binds =
               (withScopes scopes $ lookupVar var)
               (\ s ->
                 do
-                  (coerce -> scope, _) <- fromValue @(AttrSet v, PositionSet) =<< s
+                  (mkScope -> scope, _) <- fromValue @(AttrSet v, PositionSet) =<< s
 
                   clearScopes $ pushScope @v scope $ lookupVar var
               )
@@ -535,7 +535,7 @@ buildArgument params arg =
     pure $
       case t of
         That Nothing -> const $ evalError @v $ ErrorCall $ "Missing value for parameter: ''" <> show k
-        That (Just f) -> coerce $ defer . withScopes scope . (`pushScope` f)
+        That (Just f) -> defer . withScopes scope . (`pushScope` f) . mkScope
         This _ -> const $ evalError @v $ ErrorCall $ "Unexpected parameter: " <> show k
         These x _ -> const $ pure x
 
