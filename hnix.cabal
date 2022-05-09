@@ -391,6 +391,7 @@ library
     Nix.Value.Monad
     Nix.Var
     Nix.XML
+    Nix.TS.Types
   other-modules:
     Paths_hnix
     Nix.Unused
