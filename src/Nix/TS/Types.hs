@@ -2,22 +2,23 @@
 {-# language PatternSynonyms #-}
 {-# options_ghc -Wno-orphans #-}
 
-module Nix.TS.Types where
+module Nix.TS.Types
+( infer
+, NTypeLoc
+, NType
+)
+where
 
 import Nix.Expr.Types
-import Nix.Expr.Types.Annotated (NExprLoc, AnnF, SrcSpan)
-import Data.Fix (Fix(..))
+import Nix.Expr.Types.Annotated (NExprLoc, AnnF, Ann, SrcSpan, pattern AnnF, pattern Ann)
+import Data.Fix (Fix(..), foldFix)
 import Nix.Atoms (NAtom (..))
+import Text.Printf (printf)
+import qualified Data.Text as T
 -- TH
 import           Text.Show.Deriving             ( deriveShow1 )
 import           Data.Eq.Deriving               ( deriveEq1     )
 import           Data.Ord.Deriving              ( deriveOrd1   )
-import Text.Printf (printf)
-import qualified Data.Text as T
-import Nix.Eval (MonadEval(..))
-import Nix.Value.Monad (MonadValue)
-import Nix.Convert (ToValue, FromValue)
-import Nix.String (NixString)
 
 number :: [NTypeF r]
 number = [TConstant TInt, TConstant TFloat]
@@ -65,82 +66,104 @@ data NTypeF r
     , Show
     )
 
-type Variadic = Bool
-
 $(deriveShow1 ''NTypeF)
 $(deriveEq1   ''NTypeF)
 $(deriveOrd1  ''NTypeF)
 
-ret :: f (Fix f) -> Either e (Fix f)
-ret = pure . mk
+infer :: NExprLoc -> Either Text NTypeLoc
+infer = foldFix infer'
 
-mk :: f (Fix f) -> Fix f
-mk = Fix
+infer'
+  :: AnnF SrcSpan NExprF (Either Text NTypeLoc)
+  -> Either Text NTypeLoc
+infer' (AnnF src expr) =
+  let ret = pure . Ann src
+  in case expr of
+    NConstant na -> ret $ TConstant (inferAtom na)
+    NStr _ -> ret $ TConstant TStr
+    NLiteralPath _ -> ret $ TConstant TPath
+    NEnvPath _ -> ret $ TConstant TPath
+    NSym _ -> error "TODO: lookup"
+    NList itemsE -> do
+      items <- sequenceA itemsE
+      ret $ TList items
+    NSet rec' bindings -> error "TODO"
+    NUnary nuo t1m ->
+      t1m >>= evalUnary ret nuo
+    NBinary op t1m t2m -> do
+      t1 <- t1m
+      t2 <- t2m
+      evalBinary ret op t1 t2
+    NSelect _ _ _ -> undefined
+    NHasAttr _ _ -> undefined
+    NAbs arg ret' -> undefined
+    NLet lets' in' -> undefined
+    NIf cond then' else' -> undefined
+    NWith attrs scope -> undefined
+    NAssert _ _ -> undefined
+    NSynHole _ -> undefined
 
-instance MonadEval NType (Either Text) where
-  freeVariable a = Left $ "freeVariable: " <> show a
-  synHole a = Left $ "synHole: " <> show a
-  attrMissing a b = Left $ "attrMissing: " <> show (a, b)
-  evaledSym _ = pure
-  evalCurPos = Left "evalCurPos"
+type TypeAnn = Ann SrcSpan NTypeF
 
-  evalConstant na = ret $ TConstant (inferAtom na)
-  evalString = const $ ret $ TConstant TStr
-  evalLiteralPath = const $ ret $ TConstant TPath
-  evalEnvPath = const $ ret $ TConstant TPath
-  evalUnary nuo ty =
-    case nuo of
-      NNeg ->
-        if ty `elem` fmap mk number
-          then ret $ TFun ty ty
-          else err nuo "negate" ty
-      NNot ->
-        if ty == mk (TConstant TBool)
-          then ret $ TFun (mk $ TConstant TBool) (mk $ TConstant TBool)
-          else err nuo "apply 'logical or' to" ty
-  evalBinary nbo r1 r2m = do
-    r2 <- r2m
-    {- TODO: assert -}
-    let bool' = TConstant TBool
-        num = TConstant TInt
-    case nbo of
-      -- Logic
-      NEq -> ret bool'
-      NNEq -> ret bool'
-      NLt -> ret bool'
-      NLte -> ret bool'
-      NGt -> ret bool'
-      NGte -> ret bool'
-      NAnd -> ret bool'
-      NOr -> ret bool'
-      NImpl -> ret bool'
-      -- Set union
-      NUpdate -> ret $ TSet False (error "TODO")
-      -- Arithmetic
-      NPlus -> ret num
-      NMinus -> ret num
-      NMult -> ret num
-      NDiv -> ret num
-      -- List concat
-      NConcat ->
-        let getList (TList l) = Right l
-            getList badType = err nbo "concatenate" badType
-        in do
-          l1 <- getList (unFix r1)
-          l2 <- getList (unFix r2)
-          ret $ TList (l1 <> l2)
-      NApp ->
-        let handleFun (TFun funArg ret') arg
-              | funArg == arg = Right ret'
-              | otherwise = Left $ T.pack $ printf "Function argument has type %s but actual argument has type %s" (show funArg :: T.Text) (show arg :: T.Text)
-            handleFun badType arg = err nbo (printf "apply to %s" (show arg :: T.Text)) badType
-        in handleFun (unFix r1) r2
-  evalWith = error "TODO"
-  evalIf = error "TODO"
-  evalAssert = error "TODO"
-  evalApp = error "TODO"
-  evalAbs _ _ = error "TODO"
-  evalError = error "TODO"
+evalUnary
+  :: (NTypeF TypeAnn -> Either Text TypeAnn)
+  -> NUnaryOp
+  -> TypeAnn
+  -> Either Text TypeAnn
+evalUnary ret nuo (Ann src ty) =
+  let mk = Ann src
+  in case nuo of
+    NNeg ->
+      if ty `elem` number
+        then ret $ TFun (mk ty) (mk ty)
+        else err nuo "negate" ty
+    NNot ->
+      if ty == TConstant TBool
+        then ret $ TFun (mk $ TConstant TBool) (mk $ TConstant TBool)
+        else err nuo "apply 'logical or' to" ty
+
+evalBinary
+  :: (NTypeF TypeAnn -> Either Text TypeAnn)
+  -> NBinaryOp
+  -> NTypeLoc
+  -> NTypeLoc
+  -> Either Text TypeAnn
+evalBinary ret nbo (Ann _ r1) (Ann _ r2) = do
+  {- TODO: assert -}
+  let bool' = TConstant TBool
+      num = TConstant TInt
+  case nbo of
+    -- Logic
+    NEq -> ret bool'
+    NNEq -> ret bool'
+    NLt -> ret bool'
+    NLte -> ret bool'
+    NGt -> ret bool'
+    NGte -> ret bool'
+    NAnd -> ret bool'
+    NOr -> ret bool'
+    NImpl -> ret bool'
+    -- Set union
+    NUpdate -> ret $ TSet False (error "TODO")
+    -- Arithmetic
+    NPlus -> ret num
+    NMinus -> ret num
+    NMult -> ret num
+    NDiv -> ret num
+    -- List concat
+    NConcat ->
+      let getList (TList l) = Right l
+          getList badType = err nbo "concatenate" badType
+      in do
+        l1 <- getList r1
+        l2 <- getList r2
+        ret $ TList (l1 <> l2)
+    NApp ->
+      let handleFun (TFun (Ann _ funArg) ret') arg
+            | funArg == arg = Right ret'
+            | otherwise = Left $ T.pack $ printf "Function argument has type %s but actual argument has type %s" (show funArg :: T.Text) (show arg :: T.Text)
+          handleFun badType arg = err nbo (printf "apply to %s" (show arg :: T.Text)) badType
+      in handleFun r1 r2
 
 err :: (Show expr, Show ty) => expr -> String -> ty -> Either Text a
 err expr str badType =
@@ -151,19 +174,3 @@ err expr str badType =
 
 type NTypeLoc = Fix (AnnF SrcSpan NTypeF)
 type NType = Fix NTypeF
-
--- instance Scoped NType (Either Text) where
---   askScopes   = askScopesReader
---   clearScopes = clearScopesReader @(Either Text) @NExprLoc
---   pushScopes  = pushScopesReader
---   lookupVar   = lookupVarReader
-
-instance MonadValue NType (Either Text) where
-instance ToValue (AttrSet NType, PositionSet) (Either Text) NType
-instance ToValue [NType] (Either Text) NType
-instance ToValue Bool (Either Text) NType
-instance FromValue (AttrSet NType, PositionSet) (Either Text) NType
-instance FromValue NixString (Either Text) NType
-
--- check :: NExpr -> Either Text NType
--- check = foldFix Eval.evalTrace

@@ -26,6 +26,7 @@ import           Nix.Thunk.Basic
 import           Nix.Type.Env                   ( Env(..) )
 import           Nix.Type.Type                  ( Scheme )
 import qualified Nix.Type.Infer                as HM
+import qualified Nix.TS.Types                  as TS
 import           Nix.Value.Monad
 import           Options.Applicative     hiding ( ParserResult(..) )
 import           Prettyprinter           hiding ( list )
@@ -33,6 +34,7 @@ import           Prettyprinter.Render.Text      ( renderIO )
 import qualified Repl
 import           Nix.Eval
 import qualified Debug.Trace
+import qualified Data.Text as T
 
 main :: IO ()
 main =
@@ -121,11 +123,11 @@ main' opts@Options{..} = runWithBasicEffectsIO opts execContentsFilesOrRepl
             do
               expr' <- liftIO $ reduceExpr mpath expr
               either
-                (\ err -> errorWithoutStackTrace $ "Type error: " <> ppShow err)
+                (\ err -> errorWithoutStackTrace $ "Type error: " <> T.unpack err)
                 (liftIO . putStrLn . (<>) "Type of expression: " .
-                  ppShow . maybeToMonoid . Map.lookup @VarName @[Scheme] "it" . coerce
+                  ppShow
                 )
-                $ HM.inferTop mempty $ (\expr'' -> ("inferTop: " <> show expr) `Debug.Trace.trace` expr'') $ curry one "it" $ stripAnnotation expr'
+                $ TS.infer expr'
 
                 -- liftIO $ putStrLn $ runST $
                 --     runLintM opts . renderSymbolic =<< lint opts expr
