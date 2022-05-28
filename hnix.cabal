@@ -393,6 +393,7 @@ library
     Nix.XML
     Nix.TS.Types
     Nix.TS.Infer
+    Nix.TS.Monad
   other-modules:
     Paths_hnix
     Nix.Unused
