@@ -9,6 +9,7 @@ module Nix.TS.Infer
 where
 
 import Nix.TS.Types
+import Nix.TS.Monad
 
 import Nix.Expr.Types
 import Nix.Expr.Types.Annotated (NExprLoc, AnnF, SrcSpan, pattern AnnF, pattern Ann)
@@ -16,7 +17,6 @@ import Data.Fix (foldFix)
 import Nix.Atoms (NAtom (..))
 import Text.Printf (printf)
 import qualified Data.Text as T
--- TH
 
 
 number :: [NTypeF r]
@@ -30,14 +30,15 @@ inferAtom = \case
   NBool _ -> TBool
   NNull -> TNull
 
-infer :: NExprLoc -> Either Text NTypeLoc
+infer :: NExprLoc -> TypeM NTypeLoc
 infer = foldFix infer'
 
 infer'
-  :: AnnF SrcSpan NExprF (Either Text NTypeLoc)
-  -> Either Text NTypeLoc
+  :: AnnF SrcSpan NExprF (TypeM NTypeLoc)
+  -> TypeM NTypeLoc
 infer' (AnnF src expr) =
   let ret = pure . Ann src
+      retE = Right . Ann src
   in case expr of
     NConstant na -> ret $ TConstant (inferAtom na)
     NStr _ -> ret $ TConstant TStr
@@ -48,17 +49,18 @@ infer' (AnnF src expr) =
       items <- sequenceA itemsE
       ret $ TList items
     NSet rec' bindings -> error "TODO"
-    NUnary nuo t1m ->
-      t1m >>= evalUnary ret nuo
+    NUnary nuo t1m -> do
+      t1 <- t1m
+      retEither $ evalUnary retE nuo t1
     NBinary op t1m t2m -> do
       t1 <- t1m
       t2 <- t2m
-      evalBinary ret op t1 t2
+      retEither $ evalBinary retE op t1 t2
     NSelect _ _ _ -> ret $ TSet NonRecursive mempty {- TODO -}
     NHasAttr _ _ -> ret $ TConstant TBool
-    NAbs argPE retE -> do
-      ret' <- retE
-      let f :: [(VarName, Maybe (Either Text r))] -> Either Text [(VarName, Maybe r)]
+    NAbs argPE retM -> do
+      ret' <- retM
+      let f :: [(VarName, Maybe (TypeM r))] -> TypeM [(VarName, Maybe r)]
           f = traverse (traverse sequenceA)
       arg <- case argPE of
         (Param varName) -> pure $ Param varName
@@ -73,7 +75,7 @@ infer' (AnnF src expr) =
     NAssert _ _ -> undefined
     NSynHole _ -> undefined
 
-evalParams :: Params NTypeLoc -> Either Text NTypeLoc
+evalParams :: Params NTypeLoc -> TypeM NTypeLoc
 evalParams = error "TODO"
 
 evalUnary

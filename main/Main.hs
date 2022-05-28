@@ -26,7 +26,8 @@ import           Nix.Thunk.Basic
 import           Nix.Type.Env                   ( Env(..) )
 import           Nix.Type.Type                  ( Scheme )
 import qualified Nix.Type.Infer                as HM
-import qualified Nix.TS.Types                  as TS
+import qualified Nix.TS.Infer                  as TS
+import qualified Nix.TS.Monad                  as TS
 import           Nix.Value.Monad
 import           Options.Applicative     hiding ( ParserResult(..) )
 import           Prettyprinter           hiding ( list )
@@ -127,7 +128,7 @@ main' opts@Options{..} = runWithBasicEffectsIO opts execContentsFilesOrRepl
                 (liftIO . putStrLn . (<>) "Type of expression: " .
                   ppShow
                 )
-                $ TS.infer expr'
+                $ TS.runTypeM $ TS.infer expr'
 
                 -- liftIO $ putStrLn $ runST $
                 --     runLintM opts . renderSymbolic =<< lint opts expr
