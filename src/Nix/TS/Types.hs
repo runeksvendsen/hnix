@@ -1,5 +1,6 @@
 {-# language TemplateHaskell #-}
 {-# language PatternSynonyms #-}
+{-# language GeneralizedNewtypeDeriving #-}
 {-# options_ghc -Wno-orphans #-}
 
 module Nix.TS.Types
@@ -15,6 +16,8 @@ import Data.Fix (Fix(..), foldFix)
 import Nix.Atoms (NAtom (..))
 import Text.Printf (printf)
 import qualified Data.Text as T
+import Control.Monad.Trans.Reader
+import Nix.Scope (Scopes)
 -- TH
 import           Text.Show.Deriving             ( deriveShow1 )
 import           Data.Eq.Deriving               ( deriveEq1     )
@@ -51,7 +54,7 @@ data TAtom
 data NTypeF r
   = TConstant !TAtom
   | TList ![r]
-  | TSet Bool !(AttrSet (NTypeF r))
+  | TSet Recursivity !(AttrSet (NTypeF r))
   | TFun !r !r
   -- ^ A single-argument function.
   --   Types: (1) argument type (2) return type.
@@ -94,9 +97,19 @@ infer' (AnnF src expr) =
       t1 <- t1m
       t2 <- t2m
       evalBinary ret op t1 t2
-    NSelect _ _ _ -> undefined
-    NHasAttr _ _ -> undefined
-    NAbs arg ret' -> undefined
+    NSelect _ _ _ -> ret $ TSet NonRecursive mempty {- TODO -}
+    NHasAttr _ _ -> ret $ TConstant TBool
+    NAbs argPE retE -> do
+      ret' <- retE
+      let f :: [(VarName, Maybe (Either Text r))] -> Either Text [(VarName, Maybe r)]
+          f = traverse (traverse sequenceA)
+      arg <- case argPE of
+        (Param varName) -> pure $ Param varName
+        ParamSet mVarName variadic paramSetE -> do
+          paramSet <- f paramSetE
+          pure $ ParamSet mVarName variadic paramSet
+      arg' <- evalParams arg
+      ret $ TFun arg' ret'
     NLet lets' in' -> undefined
     NIf cond then' else' -> undefined
     NWith attrs scope -> undefined
@@ -104,6 +117,9 @@ infer' (AnnF src expr) =
     NSynHole _ -> undefined
 
 type TypeAnn = Ann SrcSpan NTypeF
+
+evalParams :: Params NTypeLoc -> Either Text NTypeLoc
+evalParams = error "TODO"
 
 evalUnary
   :: (NTypeF TypeAnn -> Either Text TypeAnn)
@@ -144,7 +160,7 @@ evalBinary ret nbo (Ann _ r1) (Ann _ r2) = do
     NOr -> ret bool'
     NImpl -> ret bool'
     -- Set union
-    NUpdate -> ret $ TSet False (error "TODO")
+    NUpdate -> ret $ TSet NonRecursive mempty {- TODO -}
     -- Arithmetic
     NPlus -> ret num
     NMinus -> ret num
@@ -174,3 +190,6 @@ err expr str badType =
 
 type NTypeLoc = Fix (AnnF SrcSpan NTypeF)
 type NType = Fix NTypeF
+
+newtype TypeM a = TypeM (ReaderT (Scopes (Either Text) NTypeLoc) (Either Text) a)
+  deriving (Functor, Applicative, Monad)
