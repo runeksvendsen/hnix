@@ -45,8 +45,8 @@ mkScope = Scope
 unScope :: Scope a -> AttrSet a
 unScope (Scope a) = a
 
-instance Show (Scope a) where
-  show (Scope m) = "Scope: " <> showHM m
+instance Show a => Show (Scope a) where
+  show (Scope m) = "Scope: " <> show m -- showHM m
 
 scopeLookup :: VarName -> [Scope a] -> Maybe a
 scopeLookup key = foldr fun Nothing
@@ -63,7 +63,7 @@ data Scopes m a =
     , dynamicScopes :: [m (Scope a)]
     }
 
-instance Show (Scopes m a) where
+instance Show a => Show (Scopes m a) where
   show (Scopes m a) =
     "Scopes: " <> show m <> ", and " <> show (length a) <> " with-scopes"
 
@@ -124,7 +124,9 @@ pushScopesReader
   => Scopes m a
   -> m r
   -> m r
-pushScopesReader s = local $ over hasLens (s <>)
+pushScopesReader s = do
+  Debug.Trace.traceM $ "pushScopesReader: " <> show s
+  local $ over hasLens (s <>)
 
 lookupVarReader
   :: forall m a e

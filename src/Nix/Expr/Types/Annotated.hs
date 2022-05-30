@@ -26,7 +26,7 @@ import           Data.Binary                    ( Binary(..) )
 import           Data.Data
 import           Data.Eq.Deriving
 import           Data.Fix                       ( Fix(..)
-                                                , unfoldFix
+                                                , unfoldFix, hoistFix
                                                 )
 import           Data.Functor.Compose
 import           Data.Hashable.Lifted
@@ -157,6 +157,9 @@ stripAnnF = annotated . getCompose
 
 stripAnnotation :: Functor f => Ann ann f -> Fix f
 stripAnnotation = unfoldFix (stripAnnF . unFix)
+
+stripSrcLoc :: NExprLoc -> NExpr
+stripSrcLoc = hoistFix stripAnnF
 
 annNUnary :: AnnUnit SrcSpan NUnaryOp -> NExprLoc -> NExprLoc
 annNUnary (AnnUnit s1 u) e1@(Ann s2 _) = NUnaryAnn (s1 <> s2) u e1

@@ -24,6 +24,7 @@ import           Nix.String
 import           Nix.Scope
 import           Nix.Value.Monad
 import qualified Debug.Trace
+import qualified Data.Text as T
 
 class (Show v, Monad m) => MonadEval v m where
   freeVariable    :: VarName -> m v
@@ -99,13 +100,13 @@ data SynHoleInfo m v = SynHoleInfo
 
 instance (Typeable m, Typeable v) => Exception (SynHoleInfo m v)
 
-evalTrace :: forall v m . MonadNixEval v m => Show v => NExprF (m v) -> m v
+evalTrace :: forall v m . MonadNixEval v m => NExprF (m v) -> m v
 evalTrace expr = (("eval: " <> show (void expr)) `Debug.Trace.trace`) $ eval expr
 
 -- jww (2019-03-18): By deferring only those things which must wait until
 -- context of us, this can be written as:
 -- eval :: forall v m . MonadNixEval v m => NExprF v -> m v
-eval :: forall v m . MonadNixEval v m => Show v => NExprF (m v) -> m v
+eval :: forall v m . MonadNixEval v m => NExprF (m v) -> m v
 
 eval (NSym "__curPos") = evalCurPos
 
@@ -322,6 +323,7 @@ evalBinds
   -> m (AttrSet v, PositionSet)
 evalBinds isRecursive binds =
   do
+    Debug.Trace.traceM $ "evalBinds: " <> show (fmap void binds)
     scope <- askScopes
 
     buildResult scope . fold =<< (`traverse` moveOverridesLast binds) (applyBindToAdt scope)
@@ -333,14 +335,27 @@ evalBinds isRecursive binds =
     -> m (AttrSet v, PositionSet)
   buildResult scopes bindings =
     do
+      let getVarName (varName, _, _) = varName
+      Debug.Trace.traceM . T.unpack $ unwords
+        [ "buildResult_"
+        , "lexicalScopes_"
+        , show (lexicalScopes scopes)
+        , "varNames"
+        , show (fmap getVarName bindings)
+        ]
       (mkScope -> scope, p) <- foldM insert mempty bindings
+      Debug.Trace.traceM . T.unpack $ unwords
+        [ "buildResult_"
+        , "mkScope_"
+        , show scope
+        ]
       res <-
         bool
           (traverse mkThunk)
           (loebM . fmap encapsulate)
           isRecursive
           scope
-
+      Debug.Trace.traceM $ "buildResult_ res " <> show res
       pure (unScope res, p)
 
    where
@@ -351,68 +366,65 @@ evalBinds isRecursive binds =
     encapsulate f attrs = mkThunk $ pushScope attrs f
 
   applyBindToAdt :: Scopes m v -> Binding (m v) -> m [([VarName], SourcePos, m v)]
-  applyBindToAdt _ (NamedVar (StaticKey "__overrides" :| []) finalValue pos) =
-    do
-      (o', p') <- fromValue =<< finalValue
-      -- jww (2018-05-09): What to do with the key position here?
-      pure $
-        (\ (k, v) ->
-          ( one k
-          , fromMaybe pos $ M.lookup k p'
-          , demand v
-          )
-        ) <$> M.toList o'
-
-  applyBindToAdt _ (NamedVar pathExpr finalValue pos) =
-    (\case
-      -- When there are no path segments, e.g. `${null} = 5;`, we don't
-      -- bind anything
-      ([], _, _) -> mempty
-      result     -> one result
-    ) <$> processAttrSetKeys pathExpr
-
-   where
-    processAttrSetKeys :: NAttrPath (m v) -> m ([VarName], SourcePos, m v)
-    processAttrSetKeys (h :| t) =
-      maybe
-        -- Empty attrset - return a stub.
-        (pure (mempty, nullPos, toValue @(AttrSet v, PositionSet) mempty) )
-        (\ k ->
-          list
-            -- No more keys in the attrset - return the result
-            (pure ( one k, pos, finalValue ) )
-            -- There are unprocessed keys in attrset - recurse appending the results
-            (\ (x : xs) ->
-              do
-                (restOfPath, _, v) <- processAttrSetKeys (x :| xs)
-                pure ( k : restOfPath, pos, v )
+  applyBindToAdt scopes binding = do
+    Debug.Trace.traceM $ "applyBindToAdt_ " <> show (void binding)
+    case binding of
+      (NamedVar (StaticKey "__overrides" :| []) finalValue pos) -> do
+        (o', p') <- fromValue =<< finalValue
+        -- jww (2018-05-09): What to do with the key position here?
+        pure $
+          (\ (k, v) ->
+            ( one k
+            , fromMaybe pos $ M.lookup k p'
+            , demand v
             )
-            t
-        )
-        =<< evalSetterKeyName h
+          ) <$> M.toList o'
+      (NamedVar pathExpr finalValue pos) ->
+        let processAttrSetKeys :: NAttrPath (m v) -> m ([VarName], SourcePos, m v)
+            processAttrSetKeys (h :| t) = do
+              Debug.Trace.traceM $ "processAttrSetKeys: " <> show (void h) <> ", "  <> show (void t)
+              evalSetterKeyName h >>= maybe
+                -- Empty attrset - return a stub.
+                (pure (mempty, nullPos, toValue @(AttrSet v, PositionSet) mempty) )
+                (\ k ->
+                  list
+                    -- No more keys in the attrset - return the result
+                    (pure ( one k, pos, finalValue ) )
+                    -- There are unprocessed keys in attrset - recurse appending the results
+                    (\ (x : xs) ->
+                      do
+                        (restOfPath, _, v) <- processAttrSetKeys (x :| xs)
+                        pure ( k : restOfPath, pos, v )
+                    )
+                    t
+                )
 
-  applyBindToAdt scopes (Inherit ms names pos) =
-    pure $ processScope <$> names
-   where
-    processScope
-      :: VarName
-      -> ([VarName], SourcePos, m v)
-    processScope var =
-      ( one var
-      , pos
-      , maybe
-          (attrMissing (one var) Nothing)
-          demand
-          =<< maybe
-              (withScopes scopes $ lookupVar var)
-              (\ s ->
-                do
-                  (mkScope -> scope, _) <- fromValue @(AttrSet v, PositionSet) =<< s
+        in (\case
+          -- When there are no path segments, e.g. `${null} = 5;`, we don't
+          -- bind anything
+          ([], _, _) -> mempty
+          result     -> one result
+        ) <$> processAttrSetKeys pathExpr
 
-                  clearScopes $ pushScope @v scope $ lookupVar var
+      (Inherit ms names pos) ->
+        let processScope :: VarName -> ([VarName], SourcePos, m v)
+            processScope var =
+              ( one var
+              , pos
+              , maybe
+                  (attrMissing (one var) Nothing)
+                  demand
+                  =<< maybe
+                      (withScopes scopes $ lookupVar var)
+                      (\ s ->
+                        do
+                          (mkScope -> scope, _) <- fromValue @(AttrSet v, PositionSet) =<< s
+
+                          clearScopes $ pushScope @v scope $ lookupVar var
+                      )
+                      ms
               )
-              ms
-      )
+        in pure $ processScope <$> names
 
   moveOverridesLast = uncurry (<>) . partition
     (\case
@@ -462,11 +474,12 @@ evalGetterKeyName
    . (MonadEval v m, FromValue NixString m v)
   => NKeyName (m v)
   -> m VarName
-evalGetterKeyName =
+evalGetterKeyName keyName = do
+  Debug.Trace.traceM $ "evalGetterKeyName: " <> show (void keyName)
   maybe
     (evalError @v $ ErrorCall "value is null while a string was expected")
     pure
-    <=< evalSetterKeyName
+      =<< evalSetterKeyName keyName
 
 -- | Evaluate a component of an attribute path in a context where we are
 -- *binding* a value

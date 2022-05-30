@@ -36,6 +36,7 @@ import qualified Repl
 import           Nix.Eval
 import qualified Debug.Trace
 import qualified Data.Text as T
+import Data.Fix (foldFix, hoistFix)
 
 main :: IO ()
 main =
@@ -67,7 +68,7 @@ main' opts@Options{..} = runWithBasicEffectsIO opts execContentsFilesOrRepl
         _paths -> processSeveralFiles (coerce _paths)
      where
       -- | Fall back to running the REPL
-      runRepl = withEmptyNixContext Repl.main
+      runRepl = error "disabled"
 
       readExpressionFromStdin =
         processExpr =<< liftIO Text.getContents
@@ -75,7 +76,7 @@ main' opts@Options{..} = runWithBasicEffectsIO opts execContentsFilesOrRepl
     processSeveralFiles :: [Path] -> StdIO
     processSeveralFiles = traverse_ processFile
      where
-      processFile path = handleResult (pure path) =<< parseNixFileLoc path
+      processFile path = handleResult =<< parseNixFileLoc path
 
     -- |  The `--read` option: load expression from a serialized file.
     loadBinaryCacheFile :: Maybe StdIO
@@ -102,216 +103,58 @@ main' opts@Options{..} = runWithBasicEffectsIO opts execContentsFilesOrRepl
           _fp -> readFile _fp
         ) <$> getFromFile
 
-  processExpr :: Text -> StdIO
-  processExpr = handleResult mempty . parseNixTextLoc
+doIt :: Text -> IO ()
+doIt src = do
+  now <- getCurrentTime
+  runWithBasicEffectsIO (defaultOptions now) $ processExpr src
 
-  withEmptyNixContext = withNixContext mempty
+processExpr :: Text -> StdIO
+processExpr = handleResult . parseNixTextLoc
 
-  --  2021-07-15: NOTE: @handleResult@ & @process@ - have atrocious size & compexity, they need to be decomposed & refactored.
-  handleResult mpath =
-    either
-      (\ err ->
-        bool
-          errorWithoutStackTrace
-          (liftIO . hPutStrLn stderr)
-          isIgnoreErrors
-          $ "Parse failed: " <> show err
-      )
+--  2021-07-15: NOTE: @handleResult@ & @process@ - have atrocious size & compexity, they need to be decomposed & refactored.
+handleResult =
+  either
+    (\ err -> errorWithoutStackTrace $ "Parse failed: " <> show err
+    )
 
-      (\ expr ->
-        do
-          when isCheck $
-            do
-              expr' <- liftIO $ reduceExpr mpath expr
-              either
-                (\ err -> errorWithoutStackTrace $ "Type error: " <> T.unpack err)
-                (liftIO . putStrLn . (<>) "Type of expression: " .
-                  ppShow
-                )
-                $ TS.runTypeM $ TS.infer expr'
+    (\expr -> do
+      putStrLn $ "BEFORE reduceExpr: " <> show (stripAnnotation expr)
+      expr' <- liftIO $ reduceExpr Nothing expr
+      putStrLn $ "AFTER reduceExpr: " <> show (stripAnnotation expr')
+      either
+        (\ err -> errorWithoutStackTrace $ "Type error: " <> T.unpack err)
+        (liftIO . putStrLn . (<>) "Type of expression: " . ppShow
+        )
+        (TS.runTypeM $ TS.infer expr')
 
-                -- liftIO $ putStrLn $ runST $
-                --     runLintM opts . renderSymbolic =<< lint opts expr
+        -- liftIO $ putStrLn $ runST $
+        --     runLintM opts . renderSymbolic =<< lint opts expr
+    )
 
-          catch (processCLIOptions mpath expr) $
-            \case
-              NixException frames ->
-                errorWithoutStackTrace . show =<<
-                  renderFrames
-                    @StdVal
-                    @StdThun
-                    frames
+--  2021-07-15: NOTE: Logic of CLI Option processing is scattered over several functions, needs to be consolicated.
+processCLIOptions :: Maybe Path -> NExprLoc -> StdIO
+processCLIOptions mpath expr = error "disabled"
 
-          when isRepl $
-            withEmptyNixContext $
-              bool
-                Repl.main
-                ((Repl.main' . pure) =<< nixEvalExprLoc (coerce mpath) expr)
-                isEvaluate
-      )
+reduction path mpathToContext annExpr =
+  do
+    eres <-
+      withNixContext
+        mpathToContext
+        $ reducingEvalExpr
+            evalContent
+            mpathToContext
+            annExpr
+    handleReduced path eres
 
-  --  2021-07-15: NOTE: Logic of CLI Option processing is scattered over several functions, needs to be consolicated.
-  processCLIOptions :: Maybe Path -> NExprLoc -> StdIO
-  processCLIOptions mpath expr
-    | isEvaluate =
-      if
-        | isTrace                       -> evaluateExprWith nixTracingEvalExprLoc expr
-        | Just path <- getReduce           -> evaluateExprWith (reduction path . coerce) expr
-        | null getArg || null getArgstr       -> evaluateExprWith nixEvalExprLoc expr
-        | otherwise                     -> processResult printer <=< nixEvalExprLoc (coerce mpath) $ expr
-    | isXml                        = fail "Rendering expression trees to XML is not yet implemented"
-    | isJson                       = fail "Rendering expression trees to JSON is not implemented"
-    | getVerbosity >= DebugInfo       =  liftIO . putStr . ppShow . stripAnnotation $ expr
-    | isCache , Just path <- mpath =  liftIO . writeCache (replaceExtension path "nixc") $ expr
-    | isParseOnly                  =  void . liftIO . Exception.evaluate . force $ expr
-    | otherwise                  =
-      liftIO .
-        renderIO
-          stdout
-          . layoutPretty (LayoutOptions $ AvailablePerLine 80 0.4)
-          . prettyNix
-          . stripAnnotation
-          $ expr
-   where
-    evaluateExprWith evaluator = evaluateExpression (coerce mpath) evaluator printer
-
-    printer
-      :: StdVal
-      -> StdIO
-    printer
-      | isFinder    = findAttrs <=< fromValue @(AttrSet StdVal)
-      | otherwise = printer'
-     where
-      printer'
-        | isXml       = fun (ignoreContext . toXML)                     normalForm
-        -- 2021-05-27: NOTE: With naive fix of the #941
-        -- This is overall a naive printer implementation, as options should interact/respect one another.
-        -- A nice question: "Should respect one another to what degree?": Go full combinator way, for which
-        -- old Nix CLI is nototrious for (and that would mean to reimplement the old Nix CLI),
-        -- OR: https://github.com/haskell-nix/hnix/issues/172 and have some sane standart/default behaviour for (most) keys.
-        | isJson      = fun (ignoreContext . mempty . toJSONNixString) normalForm
-        | isStrict    = fun (show . prettyNValue)                       normalForm
-        | isValues    = fun (show . prettyNValueProv)                   removeEffects
-        | otherwise = fun (show . prettyNValue)                       removeEffects
-       where
-        fun
-          :: (b -> Text)
-          -> (a -> StandardIO b)
-          -> a
-          -> StdIO
-        fun g f = liftIO . Text.putStrLn . g <=< f
-
-      findAttrs
-        :: AttrSet StdVal
-        -> StdIO
-      findAttrs = go mempty
-       where
-        go :: Text -> AttrSet StdVal -> StdIO
-        go prefix s =
-          traverse_
-            (\ (k, mv) ->
-              do
-                let
-                  path              = prefix <> k
-                  (report, descend) = filterEntry path k
-                when report $
-                  do
-                    liftIO $ Text.putStrLn path
-                    when descend $
-                      maybe
-                        stub
-                        (\case
-                          NVSet _ s' -> go (path <> ".") s'
-                          _          -> stub
-                        )
-                        mv
-            )
-            =<< traverse
-                (\ (k, nv) ->
-                  (k, ) <$>
-                  free
-                    (\ (StdThunk (extract -> Thunk _ _ ref)) ->
-                      do
-                        let
-                          path         = prefix <> k
-                          (_, descend) = filterEntry path k
-
-                        val <- readRef @StandardIO ref
-                        bool
-                          (pure Nothing)
-                          (forceEntry path nv)
-                          (descend &&
-                            deferred
-                            (const False)
-                            (const True)
-                            val
-                          )
-                    )
-                    (pure . pure . Free)
-                    nv
-                )
-                (sortWith fst $ M.toList $ M.mapKeys coerce s)
-         where
-          filterEntry path k = case (path, k) of
-            ("stdenv", "stdenv"          ) -> (True , True )
-            (_       , "stdenv"          ) -> (False, False)
-            (_       , "out"             ) -> (True , False)
-            (_       , "src"             ) -> (True , False)
-            (_       , "mirrorsFile"     ) -> (True , False)
-            (_       , "buildPhase"      ) -> (True , False)
-            (_       , "builder"         ) -> (False, False)
-            (_       , "drvPath"         ) -> (False, False)
-            (_       , "outPath"         ) -> (False, False)
-            (_       , "__impureHostDeps") -> (False, False)
-            (_       , "__sandboxProfile") -> (False, False)
-            ("pkgs"  , "pkgs"            ) -> (True , True )
-            (_       , "pkgs"            ) -> (False, False)
-            (_       , "drvAttrs"        ) -> (False, False)
-            _                              -> (True , True )
-
-          forceEntry
-            :: MonadValue a StandardIO
-            => Text
-            -> a
-            -> StandardIO (Maybe a)
-          forceEntry k v =
-            catch
-              (pure <$> demand v)
-              fun
-           where
-            fun :: NixException -> StandardIO (Maybe a)
-            fun (coerce -> frames) =
-              do
-                liftIO
-                  . Text.putStrLn
-                  . (("Exception forcing " <> k <> ": ") <>)
-                  . show =<<
-                    renderFrames
-                      @StdVal
-                      @StdThun
-                      frames
-                pure Nothing
-
-  reduction path mpathToContext annExpr =
-    do
-      eres <-
-        withNixContext
-          mpathToContext
-          $ reducingEvalExpr
-              evalContent
-              mpathToContext
-              annExpr
-      handleReduced path eres
-
-  handleReduced
-    :: (MonadThrow m, MonadIO m)
-    => Path
-    -> (NExprLoc, Either SomeException (NValue t f m))
-    -> m (NValue t f m)
-  handleReduced (coerce -> path) (expr', eres) =
-    do
-      liftIO $
-        do
-          putStrLn $ "Wrote sifted expression tree to " <> path
-          writeFile path $ show $ prettyNix $ stripAnnotation expr'
-      either throwM pure eres
+handleReduced
+  :: (MonadThrow m, MonadIO m)
+  => Path
+  -> (NExprLoc, Either SomeException (NValue t f m))
+  -> m (NValue t f m)
+handleReduced (coerce -> path) (expr', eres) =
+  do
+    liftIO $
+      do
+        putStrLn $ "Wrote sifted expression tree to " <> path
+        writeFile path $ show $ prettyNix $ stripAnnotation expr'
+    either throwM pure eres

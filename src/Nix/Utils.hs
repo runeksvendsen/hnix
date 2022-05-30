@@ -85,6 +85,7 @@ import           Lens.Family2.Stock             ( _1
                                                 )
 import qualified System.FilePath              as FilePath
 import Control.Monad.List (foldM)
+import qualified Debug.Trace
 
 #if ENABLE_TRACING
 import qualified Relude.Debug                 as X
@@ -360,7 +361,9 @@ instance Has (a, b) b where
 
 -- | Retrive monad state by 'Lens''.
 askLocal :: (MonadReader t m, Has t a) => m a
-askLocal = asks $ view hasLens
+askLocal = do
+  Debug.Trace.traceM "askLocal"
+  asks $ view hasLens
 
 -- * Other
 
